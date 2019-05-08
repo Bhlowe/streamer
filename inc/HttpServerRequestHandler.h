@@ -6,6 +6,7 @@
 ** HttpServerHandler.h
 ** 
 ** -------------------------------------------------------------------------*/
+#pragma once
 
 #include <functional>
 
@@ -23,8 +24,12 @@ class HttpServerRequestHandler : public CivetServer
 		HttpServerRequestHandler(PeerConnectionManager* webRtcServer, const std::vector<std::string>& options); 
 	
 		httpFunction getFunction(const std::string& uri);
-				
+		
+		virtual Json::Value handleRequest(const struct mg_request_info *, const Json::Value &request);
+		
+		
 	protected:
 		PeerConnectionManager* m_webRtcServer;
 		std::map<std::string,httpFunction> m_func;
+		virtual void installHandlers();
 };

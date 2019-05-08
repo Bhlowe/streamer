@@ -24,61 +24,56 @@ class RequestHandler : public CivetHandler
 
 		HttpServerRequestHandler* httpServer = (HttpServerRequestHandler*)server;
 
-		httpFunction fct = httpServer->getFunction(req_info->request_uri);
-		if (fct != NULL)
+		Json::Value  jmessage;
+
+		// read input
+		long long tlen = req_info->content_length;
+		if (tlen > 0)
 		{
-			Json::Value  jmessage;
-
-			// read input
-			long long tlen = req_info->content_length;
-			if (tlen > 0)
-			{
-				std::string body;
-				long long nlen = 0;
-				const long long bufSize = 1024;
-				char buf[bufSize];
-				while (nlen < tlen) {
-					long long rlen = tlen - nlen;
-					if (rlen > bufSize) {
-						rlen = bufSize;
-					}
-					rlen = mg_read(conn, buf, (size_t)rlen);
-					if (rlen <= 0) {
-						break;
-					}
-					body.append(buf, rlen);
-
-					nlen += rlen;
+			std::string body;
+			long long nlen = 0;
+			const long long bufSize = 1024;
+			char buf[bufSize];
+			while (nlen < tlen) {
+				long long rlen = tlen - nlen;
+				if (rlen > bufSize) {
+					rlen = bufSize;
 				}
-				RTC_LOG(INFO) << "body:" << body;
-
-				// parse in
-				Json::Reader reader;
-				if (!reader.parse(body, jmessage))
-				{
-					RTC_LOG(WARNING) << "Received unknown message:" << body;
+				rlen = mg_read(conn, buf, (size_t)rlen);
+				if (rlen <= 0) {
+					break;
 				}
+				body.append(buf, rlen);
+
+				nlen += rlen;
 			}
+			RTC_LOG(INFO) << "body:" << body;
 
-			// invoke API implementation
-			Json::Value out(fct(req_info, jmessage));
-
-			// fill out
-			if (out.isNull() == false)
+			// parse in
+			Json::Reader reader;
+			if (!reader.parse(body, jmessage))
 			{
-				std::string answer(Json::StyledWriter().write(out));
-				RTC_LOG(INFO) << "answer:" << answer;
-
-				mg_printf(conn,"HTTP/1.1 200 OK\r\n");
-				mg_printf(conn,"Access-Control-Allow-Origin: *\r\n");
-				mg_printf(conn,"Content-Type: application/json\r\n");
-				mg_printf(conn,"Content-Length: %zd\r\n", answer.size());
-				mg_printf(conn,"Connection: close\r\n");
-				mg_printf(conn,"\r\n");
-				mg_printf(conn,"%s",answer.c_str());
-
-				ret = true;
+				RTC_LOG(WARNING) << "Received unknown message:" << body;
 			}
+		}
+
+		Json::Value out(httpServer->handleRequest(req_info, jmessage));
+		if (out.isNull() == false)
+		{
+			std::string answer(Json::StyledWriter().write(out));
+			RTC_LOG(INFO) << "answer:" << answer;
+
+			mg_printf(conn,"HTTP/1.1 200 OK\r\n");
+			mg_printf(conn,"Access-Control-Allow-Origin: *\r\n");
+			mg_printf(conn,"Content-Type: application/json\r\n");
+			mg_printf(conn,"Content-Length: %zd\r\n", answer.size());
+			mg_printf(conn,"Connection: close\r\n");
+			mg_printf(conn,"\r\n");
+			mg_printf(conn,"%s",answer.c_str());
+			ret = true;
+		} else
+		{
+			RTC_LOG(INFO) << "api did not get answer: "<<req_info->query_string<<"\n";
 		}
 
 		return ret;
@@ -210,6 +205,8 @@ HttpServerRequestHandler::HttpServerRequestHandler(PeerConnectionManager* webRtc
 
 	m_func["/api/version"]                  = [this](const struct mg_request_info *req_info, const Json::Value & in) -> Json::Value {
 		Json::Value answer(VERSION);
+		std::cout<<"version:"<< answer<<"\n";
+		
 		return answer;
 	};
 
@@ -224,12 +221,40 @@ HttpServerRequestHandler::HttpServerRequestHandler(PeerConnectionManager* webRtc
 		Json::Value answer(rtc::LogMessage::GetLogToDebug());
 		return answer;
 	};
+	this->installHandlers();
+}
 
+
+void HttpServerRequestHandler::installHandlers()
+{
 	// register handlers
 	for (auto it : m_func) {
 		this->addHandler(it.first, new RequestHandler());
 	}
 }
+
+
+
+
+Json::Value HttpServerRequestHandler::handleRequest(const struct mg_request_info *req_info, const Json::Value & in)
+{
+	httpFunction fct = this->getFunction(req_info->request_uri);
+	if (fct != NULL)
+	{
+		Json::Value out = fct(req_info, in);
+		std::cout << "handleRequest " << req_info->request_uri << out.asString() <<std::endl;
+		if (!out) 
+			out = Json::objectValue;	// assign {}
+		return out;
+	} else {
+		std::cout << "getFunction failed!" << req_info->request_uri <<std::endl;
+
+		Json::Value out;
+		return out;
+		
+	}
+}
+
 
 httpFunction HttpServerRequestHandler::getFunction(const std::string& uri)
 {
@@ -238,6 +263,9 @@ httpFunction HttpServerRequestHandler::getFunction(const std::string& uri)
 	if (it != m_func.end())
 	{
 		fct = it->second;
+	} else
+	{	
+		std::cout << "getFunction failed! " << uri << std::endl;
 	}
 
 	return fct;
