@@ -7,7 +7,7 @@ WORKDIR /webrtc-streamer
 
 RUN apt-get update && apt-get install -y --no-install-recommends g++ autoconf automake libtool xz-utils libasound2-dev libgtk-3-dev cmake p7zip-full \
         && git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git /webrtc/depot_tools \
-	&& git clone https://github.com/Bhlowe/streamer.git /webrtc-streamer
+	&& git clone https://github.com/Bhlowe/streamer.git /webrtc-streamer \
         && export PATH=/webrtc/depot_tools:$PATH \
 	&& cd /webrtc \
 	&& fetch --no-history --nohooks webrtc \
