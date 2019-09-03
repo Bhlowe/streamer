@@ -14,23 +14,28 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 
+#include <cwctype>
+#include <cctype>
+
 #include "rtc_base/logging.h"
-#include "rtc_base/thread.h"
 #include "rtc_base/ref_counted_object.h"
 
 #include "rtspaudiocapturer.h"
 
 
 RTSPAudioSource::RTSPAudioSource(rtc::scoped_refptr<webrtc::AudioDecoderFactory> audioDecoderFactory, const std::string & uri, const std::map<std::string,std::string> & opts) 
-				: m_connection(m_env, this, uri.c_str(), RTSPConnection::decodeTimeoutOption(opts), RTSPConnection::decodeRTPTransport(opts), rtc::LogMessage::GetLogToDebug()<=2)
+				: m_connection(m_env, this, uri.c_str()
+					, RTSPConnection::decodeTimeoutOption(opts)
+					, RTSPConnection::decodeRTPTransport(opts)
+					, rtc::LogMessage::GetLogToDebug()<=2)
 				, m_factory(audioDecoderFactory), m_freq(8000), m_channel(1) {
-	SetName("RTSPAudioSource", NULL);
-	rtc::Thread::Start(); 
+//	SetName("RTSPAudioSource", NULL);
+	m_capturethread = std::thread(&RTSPAudioSource::CaptureThread, this); 
 }
 
 RTSPAudioSource::~RTSPAudioSource()  { 
 	m_env.stop(); 
-	rtc::Thread::Stop(); 
+	m_capturethread.join();
 }
 
 
@@ -43,6 +48,9 @@ bool RTSPAudioSource::onNewSession(const char* id, const char* media, const char
 		
 		// parse sdp to extract freq and channel
 		std::string fmt(sdp);
+	        std::transform(fmt.begin(), fmt.end(), fmt.begin(), [](unsigned char c){ return std::tolower(c); });
+		std::string codecstr(codec);
+	        std::transform(codecstr.begin(), codecstr.end(), codecstr.begin(), [](unsigned char c){ return std::tolower(c); });
 		size_t pos = fmt.find(codec);
 		if (pos != std::string::npos) {
 			fmt.erase(0, pos+strlen(codec));
@@ -63,21 +71,16 @@ bool RTSPAudioSource::onNewSession(const char* id, const char* media, const char
 		}
 		RTC_LOG(INFO) << "RTSPAudioSource::onNewSession freq:" << m_freq << " channel:" << m_channel;
 		
-		if (strcmp(codec, "PCMU") == 0) 
-		{
-			m_decoder = m_factory->MakeAudioDecoder(webrtc::SdpAudioFormat(codec, m_freq, m_channel),absl::optional<webrtc::AudioCodecPairId>());
-			success = true;
+		webrtc::SdpAudioFormat format = webrtc::SdpAudioFormat(codec, m_freq, m_channel);
+		if (m_factory->IsSupportedDecoder(format)) {
+			m_decoder = m_factory->MakeAudioDecoder(format,absl::optional<webrtc::AudioCodecPairId>());
 		}
-		else if (strcmp(codec, "OPUS") == 0) 
+		if(m_decoder.get() == NULL)
 		{
-			m_decoder = m_factory->MakeAudioDecoder(webrtc::SdpAudioFormat(codec, m_freq, m_channel),absl::optional<webrtc::AudioCodecPairId>());
-			success = true;
+			RTC_LOG(LS_ERROR) << "RTSPAudioSource::onNewSession not support codec" << sdp;
+			success = false;
 		}
-		else if (strcmp(codec, "L16") == 0)
-		{
-			m_decoder = m_factory->MakeAudioDecoder(webrtc::SdpAudioFormat(codec, m_freq, m_channel),absl::optional<webrtc::AudioCodecPairId>());
-			success = true;
-		}
+		
 	}
 	return success;			
 }
@@ -105,7 +108,7 @@ bool RTSPAudioSource::onData(const char* id, unsigned char* buffer, ssize_t size
 				outbuffer[i] = value;
 				m_buffer.pop();
 			}
-			rtc::CritScope lock(&m_sink_lock);
+			std::lock_guard<std::mutex> lock(m_sink_lock);
 			for (auto* sink : m_sinks) {
 				sink->OnData(outbuffer, 16, m_freq, m_channel, segmentLength);
 			}
@@ -113,7 +116,7 @@ bool RTSPAudioSource::onData(const char* id, unsigned char* buffer, ssize_t size
 		}
 		success = true;
 	} else {
-		RTC_LOG(LS_ERROR) << "RTSPAudioSource::onData error:No Audio decoder";
+		RTC_LOG(LS_VERBOSE) << "RTSPAudioSource::onData error:No Audio decoder";
 	}
 	return success;
 }

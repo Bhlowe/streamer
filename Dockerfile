@@ -1,36 +1,27 @@
 # build
-FROM heroku/heroku:18 as builder
+FROM heroku/heroku:18
 LABEL maintainer=michel.promonet@free.fr
 
-WORKDIR /webrtc-streamer
-# COPY . /webrtc-streamer
+WORKDIR /streamer
 
-RUN apt-get update && apt-get install -y --no-install-recommends g++ autoconf automake libtool xz-utils libasound2-dev libgtk-3-dev cmake p7zip-full \
-        && git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git /webrtc/depot_tools \
-	&& git clone https://github.com/Bhlowe/streamer.git /webrtc-streamer \
+ENV PATH="/webrtc/depot_tools:${PATH}"
+
+RUN export DEBIAN_FRONTEND=noninteractive \
+        && apt-get update && apt-get install -y --no-install-recommends g++ autoconf automake libtool xz-utils libasound2-dev libgtk-3-dev cmake p7zip-full vim sudo
+
+RUN     git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git /webrtc/depot_tools \
         && export PATH=/webrtc/depot_tools:$PATH \
-	&& cd /webrtc \
-	&& fetch --no-history --nohooks webrtc \
-	&& sed -i -e "s|'src/resources'],|'src/resources'],'condition':'rtc_include_tests==true',|" src/DEPS \
-	&& gclient sync \
-	&& cd /webrtc-streamer \
-        && git submodule update --init \
-	&& cmake . -DWEBRTCBUILD=Release -DWEBRTCDESKTOPCAPTURE=OFF \
-	&& cpack \
-	&& mkdir /app && tar xvzf webrtc-streamer*.tar.gz --strip=1 -C /app/ \
-	&& rm -rf /webrtc && rm -f *.a && rm -f src/*.o \
-	&& apt-get clean && rm -rf /var/lib/apt/lists/
+        && cd /webrtc \
+        && fetch --no-history --nohooks webrtc \
+        && sed -i -e "s|'src/resources'],|'src/resources'],'condition':'rtc_include_tests==true',|" src/DEPS \
+        && gclient sync
 
-# run
-FROM ubuntu:18.04
+# For automated builds in background...
+RUN apt-get install -y inotify-tools
 
-WORKDIR /app
-COPY --from=builder /app/ /app/
+# COPY . /streamer
+# EXPOSE 8000
 
-RUN apt-get update && apt-get install -y --no-install-recommends libasound2 libgtk-3-0 \
-	&& apt-get clean && rm -rf /var/lib/apt/lists/
+ENTRYPOINT [ "/bin/bash" ]
 
-EXPOSE 8000
 
-ENTRYPOINT [ "./webrtc-streamer" ]
-CMD [ "-a", "-C", "config.json", "screen://" ]

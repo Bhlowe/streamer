@@ -3,17 +3,20 @@
 ** support, and with no warranty, express or implied, as to its usefulness for
 ** any purpose.
 **
-** HttpServerHandler.h
+** HttpServerRequestHandler.h
 ** 
 ** -------------------------------------------------------------------------*/
+
 #pragma once
 
+#include <list>
+#include <map>
 #include <functional>
 
+#include "json/json.h"
 #include "CivetServer.h"
-#include "PeerConnectionManager.h"
+#include "API.h"
 
-typedef std::function<Json::Value(const struct mg_request_info *, const Json::Value &)> httpFunction;
 
 /* ---------------------------------------------------------------------------
 **  http callback
@@ -21,15 +24,10 @@ typedef std::function<Json::Value(const struct mg_request_info *, const Json::Va
 class HttpServerRequestHandler : public CivetServer
 {
 	public:
-		HttpServerRequestHandler(PeerConnectionManager* webRtcServer, const std::vector<std::string>& options); 
-	
-		httpFunction getFunction(const std::string& uri);
-		
-		virtual Json::Value handleRequest(const struct mg_request_info *, const Json::Value &request);
-		
-		
-	protected:
-		PeerConnectionManager* m_webRtcServer;
-		std::map<std::string,httpFunction> m_func;
-		virtual void installHandlers();
+	HttpServerRequestHandler(API * api, const std::string prefix, const std::vector<std::string>& options); 
+	const std::string prefix;		//  prefix for all webrtcserver calls. Set to "/api/" by default
+	API * api;
 };
+
+
+

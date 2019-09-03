@@ -3,271 +3,154 @@
 ** support, and with no warranty, express or implied, as to its usefulness for
 ** any purpose.
 **
-** HttpServerHandler.cpp
-**
+** HttpServerRequestHandler.cpp
+** 
 ** -------------------------------------------------------------------------*/
 
+#include <string.h>
 #include <iostream>
-
+    
 #include "HttpServerRequestHandler.h"
 
+
+static int log_message(const struct mg_connection *conn, const char *message) 
+{
+    fprintf(stderr, "%s\n", message);
+    return 0;
+}
+
+static struct CivetCallbacks _callbacks;
+static const struct CivetCallbacks * getCivetCallbacks() 
+{
+    memset(&_callbacks, 0, sizeof(_callbacks));
+    _callbacks.log_message = &log_message;
+    return &_callbacks;
+}
+
+
 /* ---------------------------------------------------------------------------
-**  Civet HTTP callback
+**  Civet HTTP callback 
 ** -------------------------------------------------------------------------*/
 class RequestHandler : public CivetHandler
 {
   public:
-	bool handle(CivetServer *server, struct mg_connection *conn)
-	{
-		bool ret = false;
-		const struct mg_request_info *req_info = mg_get_request_info(conn);
-
-		HttpServerRequestHandler* httpServer = (HttpServerRequestHandler*)server;
-
-		Json::Value  jmessage;
-
+	RequestHandler() {
+	}	  
+	
+    bool handle(CivetServer *server, struct mg_connection *conn)
+    {
+        bool ret = false;
+        const struct mg_request_info *req_info = mg_get_request_info(conn);
+        HttpServerRequestHandler * httpServer = (HttpServerRequestHandler*) server;
+        
 		// read input
-		long long tlen = req_info->content_length;
-		if (tlen > 0)
-		{
-			std::string body;
-			long long nlen = 0;
-			const long long bufSize = 1024;
-			char buf[bufSize];
-			while (nlen < tlen) {
-				long long rlen = tlen - nlen;
-				if (rlen > bufSize) {
-					rlen = bufSize;
-				}
-				rlen = mg_read(conn, buf, (size_t)rlen);
-				if (rlen <= 0) {
-					break;
-				}
-				body.append(buf, rlen);
+		const Json::Value in = this->getInputMessage(req_info, conn);
 
-				nlen += rlen;
-			}
-			RTC_LOG(INFO) << "body:" << body;
+		// invoke API implementation
+		std::string cmd(req_info->local_uri);
+		std::size_t pos = cmd.find(httpServer->prefix);      // position of "/api/" in str
+		
+		if (pos==0)	
+			cmd = cmd.substr(httpServer->prefix.length());
+		else 
+			std::cout << "expected cmd to start with prefix"<<std::endl;
+		
+		const Json::Value out = httpServer->api->dispatch(cmd, in);
 
-			// parse in
-			Json::Reader reader;
-			if (!reader.parse(body, jmessage))
-			{
-				RTC_LOG(WARNING) << "Received unknown message:" << body;
-			}
-		}
-
-		Json::Value out(httpServer->handleRequest(req_info, jmessage));
+		// fill out
 		if (out.isNull() == false)
 		{
 			std::string answer(Json::StyledWriter().write(out));
-			RTC_LOG(INFO) << "answer:" << answer;
-
+			std::cout << "answer:" << answer << std::endl<<" bytes="<<answer.size()<<std::endl;	
 			mg_printf(conn,"HTTP/1.1 200 OK\r\n");
 			mg_printf(conn,"Access-Control-Allow-Origin: *\r\n");
 			mg_printf(conn,"Content-Type: application/json\r\n");
 			mg_printf(conn,"Content-Length: %zd\r\n", answer.size());
 			mg_printf(conn,"Connection: close\r\n");
 			mg_printf(conn,"\r\n");
-			mg_printf(conn,"%s",answer.c_str());
+			mg_write( conn, answer.c_str(), answer.size() );	// don't use printf- might include % escape codes
 			ret = true;
-		} else
+		}	else
 		{
-			RTC_LOG(INFO) << "api did not get answer: "<<req_info->query_string<<"\n";
-		}
+			std::cout << "unexpected null: cmd="<<cmd<<" in:" << in<< std::endl;
+		}		
+        
+        return ret;
+    }
+    bool handleGet(CivetServer *server, struct mg_connection *conn)
+    {
+        return handle(server, conn);
+    }
+    bool handlePost(CivetServer *server, struct mg_connection *conn)
+    {
+        return handle(server, conn);
+    }
 
-		return ret;
-	}
-	bool handleGet(CivetServer *server, struct mg_connection *conn)
-	{
-		return handle(server, conn);
-	}
-	bool handlePost(CivetServer *server, struct mg_connection *conn)
-	{
-		return handle(server, conn);
-	}
+  private:
+    Json::Value getInputMessage(const struct mg_request_info *req_info, struct mg_connection *conn) {
+        Json::Value  jmessage;
+
+        // read input
+        long long tlen = req_info->content_length;
+        if (tlen > 0)
+        {
+            std::string body;
+            long long nlen = 0;
+            const long long bufSize = 1024;
+            char buf[bufSize];
+            while (nlen < tlen) {
+                long long rlen = tlen - nlen;
+                if (rlen > bufSize) {
+                    rlen = bufSize;
+                }
+                rlen = mg_read(conn, buf, (size_t)rlen);
+                if (rlen <= 0) {
+                    break;
+                }
+                body.append(buf, rlen);
+                nlen += rlen;
+            }
+
+            // parse in
+            Json::Reader reader;
+            if (!reader.parse(body, jmessage))
+            {
+                std::cout << "Received unknown message:" << body << std::endl;
+            }
+        } 
+		
+		// add any GET args, even if it is a post request. 
+		if (req_info->query_string)
+		{
+			// add any/all parameters to JSON
+			std::string postData = req_info->query_string;
+			std::stringstream tokenStream(postData);
+			std::string keyValueStr, key, value;
+			while (std::getline(tokenStream, keyValueStr, '&')) {
+				if (keyValueStr.length() > 0) {
+					std::stringstream ts(keyValueStr);
+					std::getline(ts, key, '=');
+					std::getline(ts, value, '=');
+					if (!key.empty() && !value.empty()) {
+						jmessage[key] = value;	// May want to call: UriCodec::decode(value);	 
+					}
+				}
+			}
+		}
+		// hack the remote address of the client into the "input" json object so it can be used by getIceCandidate
+		if (req_info->remote_addr)
+			jmessage["remote_addr"] = req_info->remote_addr;
+        return jmessage;
+    }	
 };
 
-
-int log_message(const struct mg_connection *conn, const char *message) 
-{
-	fprintf(stderr, "%s\n", message);
-	return 0;
-}
-
-static struct CivetCallbacks _callbacks;
-const struct CivetCallbacks * getCivetCallbacks() 
-{
-	memset(&_callbacks, 0, sizeof(_callbacks));
-	_callbacks.log_message = &log_message;
-	return &_callbacks;
-}
 
 /* ---------------------------------------------------------------------------
 **  Constructor
 ** -------------------------------------------------------------------------*/
-HttpServerRequestHandler::HttpServerRequestHandler(PeerConnectionManager* webRtcServer, const std::vector<std::string>& options)
-	: CivetServer(options, getCivetCallbacks()), m_webRtcServer(webRtcServer)
+HttpServerRequestHandler::HttpServerRequestHandler(API * api, const std::string prefix, const std::vector<std::string>& options) 
+    : CivetServer(options, getCivetCallbacks()), api(api), prefix(prefix)
 {
-	// http api callbacks
-	m_func["/api/getMediaList"]          = [this](const struct mg_request_info *req_info, const Json::Value & in) -> Json::Value {
-		return m_webRtcServer->getMediaList();
-	};
-	
-	m_func["/api/getVideoDeviceList"]    = [this](const struct mg_request_info *req_info, const Json::Value & in) -> Json::Value {
-		return m_webRtcServer->getVideoDeviceList();
-	};
-
-	m_func["/api/getAudioDeviceList"]    = [this](const struct mg_request_info *req_info, const Json::Value & in) -> Json::Value {
-		return m_webRtcServer->getAudioDeviceList();
-	};
-
-	m_func["/api/getIceServers"]         = [this](const struct mg_request_info *req_info, const Json::Value & in) -> Json::Value {
-		return m_webRtcServer->getIceServers(req_info->remote_addr);
-	};
-
-	m_func["/api/call"]                  = [this](const struct mg_request_info *req_info, const Json::Value & in) -> Json::Value {
-		std::string peerid;
-		std::string url;
-		std::string audiourl;
-		std::string options;
-		if (req_info->query_string) {
-            CivetServer::getParam(req_info->query_string, "peerid", peerid);
-            CivetServer::getParam(req_info->query_string, "url", url);
-            CivetServer::getParam(req_info->query_string, "audiourl", audiourl);
-            CivetServer::getParam(req_info->query_string, "options", options);
-        }
-		return m_webRtcServer->call(peerid, url, audiourl, options, in);
-	};
-
-	m_func["/api/hangup"]                = [this](const struct mg_request_info *req_info, const Json::Value & in) -> Json::Value {
-		std::string peerid;
-		if (req_info->query_string) {
-            CivetServer::getParam(req_info->query_string, "peerid", peerid);
-        }
-		return m_webRtcServer->hangUp(peerid);
-	};
-
-	m_func["/api/createOffer"]           = [this](const struct mg_request_info *req_info, const Json::Value & in) -> Json::Value {
-		std::string peerid;
-		std::string url;
-		std::string audiourl;
-		std::string options;
-		if (req_info->query_string) {
-            CivetServer::getParam(req_info->query_string, "peerid", peerid);
-            CivetServer::getParam(req_info->query_string, "url", url);
-            CivetServer::getParam(req_info->query_string, "audiourl", audiourl);
-            CivetServer::getParam(req_info->query_string, "options", options);
-        }
-		return m_webRtcServer->createOffer(peerid, url, audiourl, options);
-	};
-	m_func["/api/setAnswer"]             = [this](const struct mg_request_info *req_info, const Json::Value & in) -> Json::Value {
-		std::string peerid;
-		if (req_info->query_string) {
-            CivetServer::getParam(req_info->query_string, "peerid", peerid);
-        }
-		m_webRtcServer->setAnswer(peerid, in);
-		Json::Value answer(1);
-		return answer;
-	};
-
-	m_func["/api/getIceCandidate"]       = [this](const struct mg_request_info *req_info, const Json::Value & in) -> Json::Value {
-		std::string peerid;
-		if (req_info->query_string) {
-            CivetServer::getParam(req_info->query_string, "peerid", peerid);
-        }
-		return m_webRtcServer->getIceCandidateList(peerid);
-	};
-
-	m_func["/api/addIceCandidate"]       = [this](const struct mg_request_info *req_info, const Json::Value & in) -> Json::Value {
-		std::string peerid;
-		if (req_info->query_string) {
-            CivetServer::getParam(req_info->query_string, "peerid", peerid);
-        }
-		return m_webRtcServer->addIceCandidate(peerid, in);
-	};
-
-	m_func["/api/getPeerConnectionList"] = [this](const struct mg_request_info *req_info, const Json::Value & in) -> Json::Value {
-		return m_webRtcServer->getPeerConnectionList();
-	};
-
-	m_func["/api/getStreamList"] = [this](const struct mg_request_info *req_info, const Json::Value & in) -> Json::Value {
-		return m_webRtcServer->getStreamList();
-	};
-
-	m_func["/api/help"]                  = [this](const struct mg_request_info *req_info, const Json::Value & in) -> Json::Value {
-		Json::Value answer;
-		for (auto it : m_func) {
-			answer.append(it.first);
-		}
-		return answer;
-	};
-
-	m_func["/api/version"]                  = [this](const struct mg_request_info *req_info, const Json::Value & in) -> Json::Value {
-		Json::Value answer(VERSION);
-		std::cout<<"version:"<< answer<<"\n";
-		
-		return answer;
-	};
-
-	m_func["/api/log"]                      = [this](const struct mg_request_info *req_info, const Json::Value & in) -> Json::Value {
-		std::string loglevel;
-		if (req_info->query_string) {
-			CivetServer::getParam(req_info->query_string, "level", loglevel);
-			if (!loglevel.empty()) {
-				rtc::LogMessage::LogToDebug((rtc::LoggingSeverity)atoi(loglevel.c_str()));
-			}
-		}
-		Json::Value answer(rtc::LogMessage::GetLogToDebug());
-		return answer;
-	};
-	this->installHandlers();
-}
-
-
-void HttpServerRequestHandler::installHandlers()
-{
-	// register handlers
-	for (auto it : m_func) {
-		this->addHandler(it.first, new RequestHandler());
-	}
-}
-
-
-
-
-Json::Value HttpServerRequestHandler::handleRequest(const struct mg_request_info *req_info, const Json::Value & in)
-{
-	httpFunction fct = this->getFunction(req_info->request_uri);
-	if (fct != NULL)
-	{
-		Json::Value out = fct(req_info, in);
-		std::cout << "handleRequest " << req_info->request_uri << out.asString() <<std::endl;
-		if (!out) 
-			out = Json::objectValue;	// assign {}
-		return out;
-	} else {
-		std::cout << "getFunction failed!" << req_info->request_uri <<std::endl;
-
-		Json::Value out;
-		return out;
-		
-	}
-}
-
-
-httpFunction HttpServerRequestHandler::getFunction(const std::string& uri)
-{
-	httpFunction fct = NULL;
-	std::map<std::string,httpFunction>::iterator it = m_func.find(uri);
-	if (it != m_func.end())
-	{
-		fct = it->second;
-	} else
-	{	
-		std::cout << "getFunction failed! " << uri << std::endl;
-	}
-
-	return fct;
-}
-
+	std::string apiPrefix = prefix + "*";		// get all /api/ calls. 
+	this->addHandler(apiPrefix, new RequestHandler());
+}	

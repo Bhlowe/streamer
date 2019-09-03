@@ -3,72 +3,94 @@
 ** support, and with no warranty, express or implied, as to its usefulness for
 ** any purpose.
 **
-** main.cpp
-**
+** HttpServerRequestHandler.cpp
+** 
 ** -------------------------------------------------------------------------*/
 
+#include <string.h>
 #include <iostream>
-#include <fstream>
-
-#include "rtc_base/ssl_adapter.h"
-#include "rtc_base/thread.h"
-#include "p2p/base/stun_server.h"
-
-#include "PeerConnectionManager.h"
-
-#include "HttpServerRequestHandler.h"
-#include "API.h"
+    
+#include "WebRTCStreamer.h"
 #include "API2.h"
 
-#include "streamer.h"
-
-int simple(const Json::Value & config);
 
 
 /* ---------------------------------------------------------------------------
-**  main
+**  WebRTCSreamer 
 ** -------------------------------------------------------------------------*/
-int simple(int argc, char* argv[])
-{
-	const char *configFile = "streamer.json";
-	Json::Value config;
-	std::ifstream stream(configFile);
-	if (stream.good())
-		stream >> config;
-	else 
-		config = Json::objectValue;	// assign {}
+
+
 	
-	return simple(config);
+bool WebRTCStreamer::init() {
+	std::cout << "Streamer:"<<config<<std::endl;	
+	configureLogging();
+	thread = rtc::Thread::Current();
+	rtc::InitializeSSL();
+
+	webRtcServer = createPeerConnectionManager();
+	
+	if (!webRtcServer->InitializePeerConnection())
+	{
+		std::cout << "Cannot Initialize WebRTC server" << std::endl;
+		return false;
+	}
+	
+
+	// create http api dispatch handler
+	std::unique_ptr<API> api(createAPI(webRtcServer));
+	
+	// create default civetweb http server
+	std::vector<std::string> options = getServerOptions();
+	HttpServerRequestHandler httpServer(api.get(), "/api/", options);
+	// start STUN server if needed
+	std::unique_ptr<cricket::StunServer> stunserver = createOptionalStunServer();
+
+	run();	// blocks
+
+	return true;
 }
 
+
+void WebRTCStreamer::run() {
+	thread->Run();
+}
+
+void WebRTCStreamer::cleanup() 
+{
+	rtc::CleanupSSL();
+}
+
+
+
+
 // get civetweb server options from json.
-static std::vector<std::string> getServerOptions(const Json::Value & jopt)
+std::vector<std::string> WebRTCStreamer::getServerOptions()
 {
 	std::vector<std::string> options;
 	options.push_back("document_root");
-	options.push_back(jopt.get("document_root", "./html").asString());
+	options.push_back(config.get("document_root", "./html").asString());
 	options.push_back("access_control_allow_origin");
-	options.push_back(jopt.get("access_control_allow_origin", "*").asString());
+	options.push_back(config.get("access_control_allow_origin", "*").asString());
 	options.push_back("listening_ports");
-	std::string port = jopt.get("listening_ports", "8000").asString();
+	std::string port = config.get("listening_ports", "8000").asString();
 	options.push_back(port);
 	std::cout << "HTTP Listen at " << port << std::endl;
 	std::string keys[] = {"ssl_certificate", "num_threads", "global_auth_file", "authentication_domain"}; 
 	for(const std::string &key : keys)
 	{
-		if (jopt.isMember(key))
+		if (config.isMember(key))
 		{
 			options.push_back(key);
-			options.push_back(jopt.get(key,"").asString());
+			options.push_back(config.get(key,"").asString());
 		}
 	}
 	return options;
 }
 
-static std::unique_ptr<cricket::StunServer> createOptionalStunServer(const Json::Value & config, rtc::Thread* thread)
+
+std::unique_ptr<cricket::StunServer> WebRTCStreamer::createOptionalStunServer()
 {
 	std::unique_ptr<cricket::StunServer> stunserver;
-
 	if (config.isMember("local_stun_url")||config.get("use_local_stun", false).asBool())
 	{
 		rtc::SocketAddress server_addr;
@@ -84,6 +106,13 @@ static std::unique_ptr<cricket::StunServer> createOptionalStunServer(const Json:
 	return stunserver;
 }
 
+API * WebRTCStreamer::createAPI(PeerConnectionManager * webRtcServer)
+{
+	return new API2(webRtcServer, config);
+}
+
+
+// returns kPlatformDefaultAudio, kDummyAudio, etc. 
 /* 
 Returns AudioLayer enum. Can be overridden with integer passed as "audio_layer" json value.
 Defined: webrtc/modules/audio_device/include/audio_device.h
@@ -98,18 +127,15 @@ Currently, enum is:
 			};
 	So to set dummy audio, add: audio_layer:5 to json
 */
-static API * createAPI(PeerConnectionManager * webRtcServer, Json::Value config)
-{
-	return new API2(webRtcServer, config);
-}
 
-
-static webrtc::AudioDeviceModule::AudioLayer getAudioLayer(Json::Value config)
+webrtc::AudioDeviceModule::AudioLayer WebRTCStreamer::getAudioLayer()
 {
 	int v = config.get("audio_layer", webrtc::AudioDeviceModule::kPlatformDefaultAudio).asInt();
-	return (webrtc::AudioDeviceModule::AudioLayer)v;// atoi(optarg) : webrtc::AudioDeviceModule::kDummyAudio; break;
+	return (webrtc::AudioDeviceModule::AudioLayer)v;// atoi(optarg) : webrtc::AudioDeviceModule::kDummyAudio; break;	
 }
-static void configureLogging(Json::Value config)
+
+
+void WebRTCStreamer::configureLogging()
 {
 	rtc::LogMessage::LogToDebug((rtc::LoggingSeverity)config.get("log_level", rtc::LERROR).asInt());
 	rtc::LogMessage::LogTimestamps();
@@ -117,7 +143,8 @@ static void configureLogging(Json::Value config)
 	std::cout << "Logger level:" <<  rtc::LogMessage::GetLogToDebug() << std::endl;
 }
 
-static std::list<std::string> getIceServerList(Json::Value config)
+
+std::list<std::string> WebRTCStreamer::getIceServerList()
 {
 	std::list<std::string> iceServerList;
 	std::string stun_server("stun:");
@@ -129,7 +156,7 @@ static std::list<std::string> getIceServerList(Json::Value config)
 	return iceServerList;
 }
 
-static PeerConnectionManager * createPeerConnectionManager(Json::Value config)
+PeerConnectionManager * WebRTCStreamer::createPeerConnectionManager()
 {
 	std::map<std::string,std::string> urlVideoList;
 	std::map<std::string,std::string> urlAudioList;
@@ -149,33 +176,15 @@ static PeerConnectionManager * createPeerConnectionManager(Json::Value config)
 	}
 	
 	std::string publishFilter = config.get("publish_filter", ".*").asString();
-	std::list<std::string> iceServerList = getIceServerList(config);
+	std::list<std::string> iceServerList = getIceServerList();
 
-	return new PeerConnectionManager(iceServerList, urlVideoList, urlAudioList, getAudioLayer(config), publishFilter);
-
-
+	return new PeerConnectionManager(iceServerList, urlVideoList, urlAudioList, getAudioLayer(), publishFilter);
 }
 
+
+#if 0
 int simple(const Json::Value & config)
 {	
-	std::cout << "Streamer:"<<config<<std::endl;	
-	configureLogging(config);
-
-	rtc::Thread* thread = rtc::Thread::Current();
-	rtc::InitializeSSL();
-
-	// std::string publishFilter = config.get("publish_filter", ".*").asString();
-	// std::list<std::string> iceServerList = getIceServerList(config);
-	
-	PeerConnectionManager * webRtcServer = createPeerConnectionManager(config);
-
-	// PeerConnectionManager webRtcServer(iceServerList, urlVideoList, urlAudioList, getAudioLayer(config), publishFilter);
-	
-
-	if (!webRtcServer->InitializePeerConnection())
-	{
-		std::cout << "Cannot Initialize WebRTC server" << std::endl;
-	}
 	else
 	{
 		try {
@@ -183,7 +192,6 @@ int simple(const Json::Value & config)
 			std::unique_ptr<API> api(createAPI(webRtcServer, config));
 			std::vector<std::string> options = getServerOptions(config);
 			HttpServerRequestHandler httpServer(api.get(), "/api/", options);
-
 			// start STUN server if needed
 			std::unique_ptr<cricket::StunServer> stunserver = createOptionalStunServer(config, thread);
 			
@@ -200,3 +208,4 @@ int simple(const Json::Value & config)
 	return 0;
 }
 
+#endif

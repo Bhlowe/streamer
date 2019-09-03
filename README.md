@@ -140,15 +140,36 @@ A short sample HTML page using webrtc-streamer running locally on port 8000 :
 	<script src="libs/adapter.min.js" ></script>
 	<script src="webrtcstreamer.js" ></script>
 	<script>        
-	    var webRtcServer      = new WebRtcStreamer("video",location.protocol+"//"+window.location.hostname+":8000");
-	    window.onload         = function() { webRtcServer.connect("rtsp://pi2.local:8554/unicast") }
-	    window.onbeforeunload = function() { webRtcServer.disconnect() }
+	    var webRtcServer      = null;
+	    window.onload         = function() { 
+	        webRtcServer      = new WebRtcStreamer("video",location.protocol+"//"+window.location.hostname+":8000");
+		webRtcServer.connect("rtsp://pi2.local:8554/unicast");
+	    }
+	    window.onbeforeunload = function() { webRtcServer.disconnect(); }
 	</script>
 	</head>
 	<body> 
 	    <video id="video" />
 	</body>
 	</html>
+
+Using WebComponent
+==================
+Using web-component could be a simple way to display some webrtc stream, a minimal page could be :
+
+	<html>
+	<head>
+           <script src="webrtcstreamer.js"></script>
+           <script src="webrtcstreamer.json"></script>
+           <script type="module" src="webrtc-streamer-element.js"></script>
+	</head>
+	<body>
+	   <webrtc-streamer videostream="Bunny"></webrtc-streamer>
+	   <webrtc-streamer videostream="rtsp://184.72.239.149/vod/mp4:BigBuckBunny_175k.mov"></webrtc-streamer>
+	</body>
+	</html>
+
+[Live Demo](https://webrtc-streamer.herokuapp.com/Bunny.html)
 
 Connect to Janus Gateway Video Room
 ===============

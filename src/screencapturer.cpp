@@ -66,7 +66,7 @@ void DesktopCapturer::OnCaptureResult(webrtc::DesktopCapturer::Result result, st
 	}
 }
 		
-void DesktopCapturer::Run() {
+void DesktopCapturer::CaptureThread() {
 	RTC_LOG(INFO) << "DesktopCapturer:Run start";
 	while (IsRunning()) {
 		m_capturer->CaptureFrame();
@@ -75,14 +75,14 @@ void DesktopCapturer::Run() {
 }
 bool DesktopCapturer::Start() {
 	m_isrunning = true;
-	rtc::Thread::Start();
+	m_capturethread = std::thread(&DesktopCapturer::CaptureThread, this); 
 	m_capturer->Start(this);
 	return true;
 }
 		
 void DesktopCapturer::Stop() {
 	m_isrunning = false;
-	rtc::Thread::Stop();
+	m_capturethread.join(); 
 }
 		
 #endif
