@@ -51,7 +51,7 @@ bool RTSPAudioSource::onNewSession(const char* id, const char* media, const char
 	        std::transform(fmt.begin(), fmt.end(), fmt.begin(), [](unsigned char c){ return std::tolower(c); });
 		std::string codecstr(codec);
 	        std::transform(codecstr.begin(), codecstr.end(), codecstr.begin(), [](unsigned char c){ return std::tolower(c); });
-		size_t pos = fmt.find(codec);
+		size_t pos = fmt.find(codecstr);
 		if (pos != std::string::npos) {
 			fmt.erase(0, pos+strlen(codec));
 			fmt.erase(fmt.find_first_of(" \r\n"));
@@ -69,16 +69,14 @@ bool RTSPAudioSource::onNewSession(const char* id, const char* media, const char
 				m_channel = std::stoi(channel);
 			}
 		}
-		RTC_LOG(INFO) << "RTSPAudioSource::onNewSession freq:" << m_freq << " channel:" << m_channel;
+		RTC_LOG(INFO) << "RTSPAudioSource::onNewSession code:"<< codec << " freq:" << m_freq << " channel:" << m_channel;
 		
 		webrtc::SdpAudioFormat format = webrtc::SdpAudioFormat(codec, m_freq, m_channel);
 		if (m_factory->IsSupportedDecoder(format)) {
 			m_decoder = m_factory->MakeAudioDecoder(format,absl::optional<webrtc::AudioCodecPairId>());
-		}
-		if(m_decoder.get() == NULL)
-		{
+			success = true;
+		} else {
 			RTC_LOG(LS_ERROR) << "RTSPAudioSource::onNewSession not support codec" << sdp;
-			success = false;
 		}
 		
 	}

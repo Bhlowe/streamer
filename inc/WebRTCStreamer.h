@@ -36,24 +36,37 @@ class WebRTCStreamer
 	virtual void run();
 	virtual void cleanup();
 	
+	virtual void setStreams(std::map<std::string,std::string> vURLs, std::map<std::string,std::string> aURLs, std::map<std::string,std::string>positions)
+	{
+		urlVideoList = vURLs;
+		urlAudioList = aURLs;
+		positionList = positions;
+	}
+
+
 	protected:
-	Json::Value config;
-	rtc::Thread* thread=null;
-	PeerConnectionManager * webRtcServer;
+	Json::Value config;	// config settings for streamer. From json file, extracted from command line arguments, etc.
+
+	rtc::Thread* thread=NULL;
+	PeerConnectionManager * webRtcServer = NULL;
+	API *api = NULL;
+	cricket::StunServer * stunserver=NULL;
+	HttpServerRequestHandler * httpServer = NULL;
+
+	std::map<std::string,std::string> urlVideoList;
+	std::map<std::string,std::string> urlAudioList;
+	std::map<std::string,std::string> positionList;	
+
 
 	virtual std::vector<std::string> getServerOptions();
-	virtual std::unique_ptr<cricket::StunServer> createOptionalStunServer();
-	virtual API * createAPI(PeerConnectionManager * webRtcServer);
+	virtual void initStunServer();
+	virtual API * createAPI();
+	virtual void createHttpServer();
 
 	// returns kPlatformDefaultAudio, kDummyAudio, etc. 
 	virtual webrtc::AudioDeviceModule::AudioLayer getAudioLayer();
-	virtual void configureLogging();
+	virtual void initLogging();
 	virtual std::list<std::string> getIceServerList();
 	virtual PeerConnectionManager * createPeerConnectionManager();
-
 	
 };
-
-
-
-

@@ -1,11 +1,10 @@
 #pragma once
-// HttpServer agnostic request handlers
-
 #include "json/json.h"
 #include <string>
 #include "PeerConnectionManager.h"
 
-
+// A singleton class to dispatch all http responses for webrtc streaming.
+// Is http server agnostic, so all requests get a JSON input and respond with JSON.
 class API
 {
 	public:
@@ -47,9 +46,7 @@ class API
 	virtual void installMethods();
 	
 	virtual std::map<std::string,API::RequestMethod> getFunctionMap() { return functionMap; }
-
 	private:
-	
 	std::map<std::string, API::RequestMethod> functionMap;		// list of known methods
 
 };

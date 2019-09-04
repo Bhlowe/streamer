@@ -6,7 +6,7 @@
 ** main.cpp
 **
 ** -------------------------------------------------------------------------*/
-
+#if 0
 #include <iostream>
 #include <fstream>
 
@@ -528,3 +528,4 @@ int streamer(int argc, char* argv[])
 	return 0;
 }
 
+#endif

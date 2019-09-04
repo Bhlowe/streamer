@@ -10,7 +10,7 @@
 
 #include <iostream>
 #include <fstream>
-#include <utility>
+#include <utility> 
 #include <functional>
 
 #include "api/video_codecs/builtin_video_decoder_factory.h"
@@ -138,7 +138,7 @@ IceServer getIceServerFromUrl(const std::string & url, const std::string& client
 webrtc::PeerConnectionFactoryDependencies CreatePeerConnectionFactoryDependencies(rtc::scoped_refptr<webrtc::AudioDeviceModule> audioDeviceModule, rtc::scoped_refptr<webrtc::AudioDecoderFactory> audioDecoderfactory) {
 	webrtc::PeerConnectionFactoryDependencies dependencies;
 	dependencies.network_thread = NULL;
-	dependencies.worker_thread = NULL;
+	dependencies.worker_thread = rtc::Thread::Current();
 	dependencies.signaling_thread = NULL;
 	dependencies.call_factory = webrtc::CreateCallFactory();
 	dependencies.task_queue_factory = webrtc::CreateDefaultTaskQueueFactory();	
@@ -156,7 +156,7 @@ webrtc::PeerConnectionFactoryDependencies CreatePeerConnectionFactoryDependencie
 
 	dependencies.media_engine = cricket::CreateMediaEngine(std::move(mediaDependencies));
 	
-	return std::move(dependencies);
+	return dependencies;
 }
 
 /* ---------------------------------------------------------------------------
@@ -165,6 +165,7 @@ webrtc::PeerConnectionFactoryDependencies CreatePeerConnectionFactoryDependencie
 PeerConnectionManager::PeerConnectionManager( const std::list<std::string> & iceServerList
 					    , const std::map<std::string,std::string> & urlVideoList
 					    , const std::map<std::string,std::string> & urlAudioList
+					    , const std::map<std::string,std::string> & positionList
 					    , const webrtc::AudioDeviceModule::AudioLayer audioLayer
                                             , const std::string& publishFilter)
 	: m_audioDecoderfactory(webrtc::CreateBuiltinAudioDecoderFactory())	
@@ -174,10 +175,11 @@ PeerConnectionManager::PeerConnectionManager( const std::list<std::string> & ice
 #else
 	, m_audioDeviceModule(new webrtc::FakeAudioDeviceModule())
 #endif
-	, m_peer_connection_factory(webrtc::CreateModularPeerConnectionFactory(std::move(CreatePeerConnectionFactoryDependencies(m_audioDeviceModule, m_audioDecoderfactory))))
+	, m_peer_connection_factory(webrtc::CreateModularPeerConnectionFactory(CreatePeerConnectionFactoryDependencies(m_audioDeviceModule, m_audioDecoderfactory)))
 	, m_iceServerList(iceServerList)
 	, m_urlVideoList(urlVideoList)
 	, m_urlAudioList(urlAudioList)
+	, m_positionList(positionList)
 	, m_publishFilter(publishFilter)
 {
 	// build video audio map
@@ -227,6 +229,11 @@ const Json::Value PeerConnectionManager::getMediaList()
 		{
 			media["audio"] = audioIt->first;			
 		}
+		auto positionIt = m_positionList.find(url.first);
+		if (positionIt != m_positionList.end()) 
+		{
+			media["position"] = positionIt->second;			
+		}		
 		value.append(media);
 	}
 

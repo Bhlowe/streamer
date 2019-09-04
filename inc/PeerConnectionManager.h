@@ -258,7 +258,7 @@ class PeerConnectionManager {
 	};
 
 	public:
-		PeerConnectionManager(const std::list<std::string> & iceServerList, const std::map<std::string,std::string> & urlVideoList, const std::map<std::string,std::string> & urlAudioList, const webrtc::AudioDeviceModule::AudioLayer audioLayer, const std::string& publishFilter);
+		PeerConnectionManager(const std::list<std::string> & iceServerList, const std::map<std::string,std::string> & urlVideoList, const std::map<std::string,std::string> & urlAudioList, const std::map<std::string,std::string> & positionList, const webrtc::AudioDeviceModule::AudioLayer audioLayer, const std::string& publishFilter);
 		virtual ~PeerConnectionManager();
 
 		bool InitializePeerConnection();
@@ -289,9 +289,9 @@ class PeerConnectionManager {
 
 	protected:
 		typedef std::pair< rtc::scoped_refptr<webrtc::VideoTrackInterface>, rtc::scoped_refptr<webrtc::AudioTrackInterface>> AudioVideoPair;
+		rtc::scoped_refptr<webrtc::AudioDecoderFactory>                           m_audioDecoderfactory;
 		std::unique_ptr<webrtc::TaskQueueFactory>                                 m_task_queue_factory;
 		rtc::scoped_refptr<webrtc::AudioDeviceModule>                             m_audioDeviceModule;
-		rtc::scoped_refptr<webrtc::AudioDecoderFactory>                           m_audioDecoderfactory;
 		rtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface>                m_peer_connection_factory;
 		std::mutex                                                                m_peerMapMutex;
 		std::map<std::string, PeerConnectionObserver* >                           m_peer_connectionobs_map;
@@ -300,6 +300,7 @@ class PeerConnectionManager {
 		std::list<std::string>                                                    m_iceServerList;
 		const std::map<std::string,std::string>                                   m_urlVideoList;
 		const std::map<std::string,std::string>                                   m_urlAudioList;
+		const std::map<std::string,std::string>                                   m_positionList;
 		std::map<std::string,std::string>                                         m_videoaudiomap;
 		const std::regex                                                          m_publishFilter;
 };

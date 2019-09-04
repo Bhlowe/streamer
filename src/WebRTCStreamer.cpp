@@ -11,19 +11,16 @@
 #include <iostream>
     
 #include "WebRTCStreamer.h"
-#include "API2.h"
-
-
+#include "API.h"
 
 /* ---------------------------------------------------------------------------
 **  WebRTCSreamer 
 ** -------------------------------------------------------------------------*/
 
-
 	
 bool WebRTCStreamer::init() {
 	std::cout << "Streamer:"<<config<<std::endl;	
-	configureLogging();
+	initLogging();
 	thread = rtc::Thread::Current();
 	rtc::InitializeSSL();
 
@@ -34,18 +31,13 @@ bool WebRTCStreamer::init() {
 		std::cout << "Cannot Initialize WebRTC server" << std::endl;
 		return false;
 	}
-	
 
-	// create http api dispatch handler
-	std::unique_ptr<API> api(createAPI(webRtcServer));
+	createHttpServer();
 	
-	// create default civetweb http server
-	std::vector<std::string> options = getServerOptions();
-	HttpServerRequestHandler httpServer(api.get(), "/api/", options);
 	// start STUN server if needed
-	std::unique_ptr<cricket::StunServer> stunserver = createOptionalStunServer();
+	initStunServer();
+	std::cout << "Started\n";
 
-	run();	// blocks
 
 	return true;
 }
@@ -55,9 +47,23 @@ void WebRTCStreamer::run() {
 	thread->Run();
 }
 
+void WebRTCStreamer::createHttpServer() {
+	// create http api dispatch handler
+	api = createAPI();
+	// create default civetweb http server
+	std::vector<std::string> options = getServerOptions();
+	httpServer = new HttpServerRequestHandler(api, "/api/", options);
+}
+
 void WebRTCStreamer::cleanup() 
 {
+	std::cout << "cleanup\n";
+
 	rtc::CleanupSSL();
+	if (httpServer) delete httpServer;
+	if (stunserver) delete stunserver;
+	if (api) delete api;
+
 }
 
 
@@ -88,9 +94,11 @@ std::vector<std::string> WebRTCStreamer::getServerOptions()
 }
 
 
-std::unique_ptr<cricket::StunServer> WebRTCStreamer::createOptionalStunServer()
+// If configured, this will create a local stun server.
+// default action is to use google's stun server.  
+void WebRTCStreamer::initStunServer()
 {
-	std::unique_ptr<cricket::StunServer> stunserver;
+
 	if (config.isMember("local_stun_url")||config.get("use_local_stun", false).asBool())
 	{
 		rtc::SocketAddress server_addr;
@@ -99,16 +107,15 @@ std::unique_ptr<cricket::StunServer> WebRTCStreamer::createOptionalStunServer()
 		
 		if (server_socket)
 		{
-			stunserver.reset(new cricket::StunServer(server_socket));
+			stunserver = new cricket::StunServer(server_socket);
 			std::cout << "STUN Listening at " << server_addr.ToString() << std::endl;
 		}
 	}
-	return stunserver;
 }
 
-API * WebRTCStreamer::createAPI(PeerConnectionManager * webRtcServer)
+API * WebRTCStreamer::createAPI()
 {
-	return new API2(webRtcServer, config);
+	return new API(webRtcServer);
 }
 
 
@@ -135,7 +142,7 @@ webrtc::AudioDeviceModule::AudioLayer WebRTCStreamer::getAudioLayer()
 }
 
 
-void WebRTCStreamer::configureLogging()
+void WebRTCStreamer::initLogging()
 {
 	rtc::LogMessage::LogToDebug((rtc::LoggingSeverity)config.get("log_level", rtc::LERROR).asInt());
 	rtc::LogMessage::LogTimestamps();
@@ -158,8 +165,6 @@ std::list<std::string> WebRTCStreamer::getIceServerList()
 
 PeerConnectionManager * WebRTCStreamer::createPeerConnectionManager()
 {
-	std::map<std::string,std::string> urlVideoList;
-	std::map<std::string,std::string> urlAudioList;
 
 	if (config.isMember("urls")) {
 		Json::Value urls = config["urls"];
@@ -172,40 +177,14 @@ PeerConnectionManager * WebRTCStreamer::createPeerConnectionManager()
 				if (value.isMember("audio")) {
 					urlAudioList[name]=value["audio"].asString();
 				}
+				if (value.isMember("position")) {
+					positionList[name]=value["position"].asString();
+				}
 		}
 	}
 	
 	std::string publishFilter = config.get("publish_filter", ".*").asString();
 	std::list<std::string> iceServerList = getIceServerList();
 
-	return new PeerConnectionManager(iceServerList, urlVideoList, urlAudioList, getAudioLayer(), publishFilter);
+	return new PeerConnectionManager(iceServerList, urlVideoList, urlAudioList, positionList, getAudioLayer(), publishFilter);
 }
-
-
-#if 0
-int simple(const Json::Value & config)
-{	
-	else
-	{
-		try {
-
-			std::unique_ptr<API> api(createAPI(webRtcServer, config));
-			std::vector<std::string> options = getServerOptions(config);
-			HttpServerRequestHandler httpServer(api.get(), "/api/", options);
-			// start STUN server if needed
-			std::unique_ptr<cricket::StunServer> stunserver = createOptionalStunServer(config, thread);
-			
-			// mainloop
-			thread->Run();
-
-		} catch (const CivetException & ex) {
-			std::cout << "Cannot Initialize start HTTP server exception:" << ex.what() << std::endl;
-			return -1;
-		}
-	}
-
-	rtc::CleanupSSL();
-	return 0;
-}
-
-#endif

@@ -5,23 +5,16 @@
 API2::API2(PeerConnectionManager * webRtcServer, const Json::Value & config)
 	: API(webRtcServer), config(config)
 {
-	std::cout << "API2\n";
 	installMethods();
-
 }
 
-
+// add or override new methods
 void API2::installMethods()
 {
-	std::cout << "installMethods\n";
-
 	API::installMethods();
-
 	addMethod("test", (API::RequestMethod) &API2::test);
 	addMethod("addSource", (API::RequestMethod) &API2::addSource);
 	addMethod("removeSource", (API::RequestMethod) &API2::removeSource);
-	std::cout << "installMethods\n";
-
 }
 
 
